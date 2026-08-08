@@ -8,53 +8,140 @@ FinGuard is a comprehensive real-time fraud detection and financial monitoring s
 
 ## 🏗️ Architecture
 
+### High-Level System Design
+
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                     Data Sources                                 │
-│  ┌──────────────┐      ┌──────────────┐     ┌──────────────┐  │
-│  │   Kafka      │      │  File Upload │     │   External   │  │
-│  │   Stream     │      │  (Autoloader)│     │   Watchlist  │  │
-│  └──────────────┘      └──────────────┘     └──────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                     Bronze Layer (Raw Data)                      │
-│  ┌──────────────────────┐         ┌──────────────────────┐     │
-│  │  transactions_bronze │         │ fraud_watchlist_bronze│     │
-│  │  (Delta Tables)      │         │  (Delta Tables)       │     │
-│  └──────────────────────┘         └──────────────────────┘     │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                   Silver Layer (Cleansed)                        │
-│  ┌──────────────────────┐         ┌──────────────────────┐     │
-│  │  customers_silver    │         │  enriched_transactions│     │
-│  │  (Validated)         │         │  (Joined & Filtered)  │     │
-│  └──────────────────────┘         └──────────────────────┘     │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                   Fraud Detection Engine                         │
-│  ┌────────────────────────────────────────────────────────┐    │
-│  │  • Watchlist matching                                   │    │
-│  │  • High-value transaction alerts                        │    │
-│  │  • Anomaly detection (ML-ready)                         │    │
-│  │  • Real-time scoring                                    │    │
-│  └────────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    Alert & Notification System                   │
-│  ┌──────────────────────┐         ┌──────────────────────┐     │
-│  │   Email Alerts       │         │  Dashboard Updates   │     │
-│  │   (SMTP)             │         │  (Lakeview)          │     │
-│  └──────────────────────┘         └──────────────────────┘     │
-└─────────────────────────────────────────────────────────────────┘
+╔═══════════════════════════════════════════════════════════════════════╗
+║                          FINGUARD ARCHITECTURE                        ║
+║                    Real-Time Fraud Detection Pipeline                 ║
+╚═══════════════════════════════════════════════════════════════════════╝
+
+┌───────────────────────────────────────────────────────────────────────┐
+│                          📥 INGESTION LAYER                           │
+├───────────────────────────────────────────────────────────────────────┤
+│                                                                       │
+│   ┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
+│   │  🌊 Kafka       │      │  📁 Auto Loader │      │  🗂️  Watchlist  │
+│   │  Streaming      │      │  File Upload    │      │  External Data  │
+│   │                 │      │                 │      │                 │
+│   │  • Real-time    │      │  • CSV/JSON     │      │  • Known Fraud  │
+│   │  • High volume  │      │  • Schema Auto  │      │  • Blacklists   │
+│   │  • Low latency  │      │  • Incremental  │      │  • Risk Scores  │
+│   └────────┬────────┘      └────────┬────────┘      └────────┬────────┘
+│            │                        │                        │       │
+└────────────┼────────────────────────┼────────────────────────┼───────┘
+             │                        │                        │
+             └────────────────────────┼────────────────────────┘
+                                      ▼
+┌───────────────────────────────────────────────────────────────────────┐
+│                    🥉 BRONZE LAYER - Raw Data Lake                    │
+├───────────────────────────────────────────────────────────────────────┤
+│  Technology: Delta Lake | Format: Parquet | Compression: Snappy      │
+│                                                                       │
+│   ┌─────────────────────────────┐      ┌──────────────────────────────┐
+│   │  transactions_bronze        │      │  fraud_watchlist_bronze      │
+│   ├─────────────────────────────┤      ├──────────────────────────────┤
+│   │  • Raw transaction data     │      │  • Fraud entity lists        │
+│   │  • No transformations       │      │  • Risk classifications      │
+│   │  • Full history retained    │      │  • Regular updates           │
+│   │  • Schema validation        │      │  • Versioned snapshots       │
+│   └──────────────┬──────────────┘      └──────────────┬───────────────┘
+│                  │                                     │              │
+└──────────────────┼─────────────────────────────────────┼──────────────┘
+                   │                                     │
+                   └──────────────┬──────────────────────┘
+                                  ▼
+┌───────────────────────────────────────────────────────────────────────┐
+│                🥈 SILVER LAYER - Cleansed & Enriched                  │
+├───────────────────────────────────────────────────────────────────────┤
+│  Data Quality: Validated | Deduplicated | Type-Safe | Business Rules │
+│                                                                       │
+│   ┌─────────────────────────────┐      ┌──────────────────────────────┐
+│   │  customers_silver           │      │  enriched_transactions       │
+│   ├─────────────────────────────┤      ├──────────────────────────────┤
+│   │  • Customer master data     │◄─────┤  • Joined with customer data │
+│   │  • Validated records        │ Join │  • Fraud score calculated    │
+│   │  • Active accounts only     │      │  • Enriched with metadata    │
+│   │  • SCD Type 2 history       │      │  • Filtered & cleaned        │
+│   └─────────────────────────────┘      └──────────────┬───────────────┘
+│                                                        │              │
+└────────────────────────────────────────────────────────┼──────────────┘
+                                                         ▼
+┌───────────────────────────────────────────────────────────────────────┐
+│                      🎯 FRAUD DETECTION ENGINE                        │
+├───────────────────────────────────────────────────────────────────────┤
+│  Processing: Real-Time | ML-Ready | Rule-Based | Pattern Recognition │
+│                                                                       │
+│   ╔═════════════════════════════════════════════════════════════╗   │
+│   ║                      Detection Algorithms                   ║   │
+│   ╠═════════════════════════════════════════════════════════════╣   │
+│   ║                                                             ║   │
+│   ║  🔍 Watchlist Matching                                      ║   │
+│   ║     └─ Cross-reference with known fraud entities           ║   │
+│   ║     └─ Card/Merchant/Customer blacklist checks             ║   │
+│   ║                                                             ║   │
+│   ║  💰 High-Value Transaction Alerts                          ║   │
+│   ║     └─ Configurable threshold monitoring                   ║   │
+│   ║     └─ Currency-aware amount checks                        ║   │
+│   ║                                                             ║   │
+│   ║  📊 Anomaly Detection (ML-Ready)                           ║   │
+│   ║     └─ Behavioral pattern analysis                         ║   │
+│   ║     └─ Velocity checks (transaction frequency)             ║   │
+│   ║     └─ Geographic anomalies                                ║   │
+│   ║                                                             ║   │
+│   ║  ⚡ Real-Time Scoring                                       ║   │
+│   ║     └─ Composite risk score calculation                    ║   │
+│   ║     └─ Confidence level assignment                         ║   │
+│   ║                                                             ║   │
+│   ╚═════════════════════════════════════════════════════════════╝   │
+│                                  │                                    │
+└──────────────────────────────────┼────────────────────────────────────┘
+                                   ▼
+┌───────────────────────────────────────────────────────────────────────┐
+│                    📢 ALERT & NOTIFICATION SYSTEM                     │
+├───────────────────────────────────────────────────────────────────────┤
+│  Delivery: Multi-Channel | Priority-Based | Configurable Rules       │
+│                                                                       │
+│   ┌──────────────────────────┐           ┌──────────────────────────┐
+│   │  📧 Email Alerts         │           │  📊 Dashboard Updates    │
+│   ├──────────────────────────┤           ├──────────────────────────┤
+│   │  • SMTP Integration      │           │  • Lakeview Dashboards   │
+│   │  • Rich HTML templates   │           │  • Real-time metrics     │
+│   │  • Priority tagging      │           │  • Historical trends     │
+│   │  • Fraud analyst team    │           │  • Drill-down analysis   │
+│   └──────────────────────────┘           └──────────────────────────┘
+│                                                                       │
+│   ┌──────────────────────────┐           ┌──────────────────────────┐
+│   │  📝 Audit Logging        │           │  🔔 Future: Slack/Teams  │
+│   ├──────────────────────────┤           ├──────────────────────────┤
+│   │  • Complete trail        │           │  • Instant notifications │
+│   │  • Compliance reporting  │           │  • Bot integration       │
+│   │  • Investigation support │           │  • Channel routing       │
+│   └──────────────────────────┘           └──────────────────────────┘
+│                                                                       │
+└───────────────────────────────────────────────────────────────────────┘
+
+╔═══════════════════════════════════════════════════════════════════════╗
+║                          TECHNOLOGY STACK                             ║
+╠═══════════════════════════════════════════════════════════════════════╣
+║  Platform      : Databricks Lakehouse (Unity Catalog)                ║
+║  Storage       : Delta Lake (ACID transactions, time travel)         ║
+║  Streaming     : Apache Kafka + Structured Streaming                 ║
+║  Processing    : Apache Spark (PySpark)                              ║
+║  Orchestration : Delta Live Tables (DLT)                             ║
+║  Languages     : Python, SQL                                         ║
+║  Monitoring    : Lakeview Dashboards                                 ║
+╚═══════════════════════════════════════════════════════════════════════╝
 ```
+
+### Data Flow Summary
+
+1. **Ingestion** → Raw data from multiple sources (Kafka streams, file uploads, external APIs)
+2. **Bronze Layer** → Immutable raw data storage with full history
+3. **Silver Layer** → Validated, cleansed, and enriched data ready for analysis
+4. **Detection Engine** → Real-time fraud analysis using multiple algorithms
+5. **Alerting** → Multi-channel notifications to fraud analysts and stakeholders
+
 
 ## ✨ Key Features
 
